@@ -1,0 +1,24 @@
+{
+  "name": "wah-automation",
+  "version": "1.0.0",
+  "description": "Playwright automation for WAH end visits.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shankencedric/wah-automation.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/shankencedric/wah-automation/issues"
+  },
+  "homepage": "https://github.com/shankencedric/wah-automation#readme",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "playwright": "^1.61.1"
+  }
+}
