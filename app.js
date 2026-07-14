@@ -66,9 +66,9 @@ async function runAutomation() {
             console.log(`📋 Detected ${patientRows.length} patients.`);
 
             // Look for the topmost unchecked person who hasn't been skipped yet
-            let i = 0;
-            for (i = Math.max(0, CONFIG.skipToRow); i < patientRows.length; i++) {
-                const row = patientRows[i]; 
+            let rowIdx = 0;
+            for (rowIdx = Math.max(0, CONFIG.skipToRow); rowIdx < patientRows.length; rowIdx++) {
+                const row = patientRows[rowIdx]; 
 
                 // Get all the text inside the entire patient row card
                 const fullRowText = await row.innerText().catch(() => "");
@@ -90,7 +90,7 @@ async function runAutomation() {
                 break;
             }
 
-            console.log(`\nProcessing patient #${totalCount} on Row ${i}: ${targetPatientName}`);
+            console.log(`\nProcessing patient #${totalCount} on Row ${rowIdx}: ${targetPatientName}`);
 
             // 3b. Click the Consultation button of the target patient
             const consultButton = targetPatientRow.locator('button, a, div.btn').filter({ hasText: /consultation|cn/i }).first();
