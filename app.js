@@ -4,10 +4,20 @@ require('dotenv').config();
 // Import the external developer's dictionary from the JSON file
 const DIAGNOSIS_MAP = require('./diagnoses.json');
 
+const CONFIG = require('./config.json');
+
 async function runAutomation() {
-    const browser = await chromium.launch({ headless: false, slowMo: 100 });
+    
+    const browser = await chromium.launch({ headless: false, slowMo: CONFIG.debug_mode ? 200 : 50 });
     const context = await browser.newContext();
     const page = await context.newPage();
+
+    // Some automation data
+    let endedVisitCount = 0;
+    const skippedPatientNames = new Set();
+    let totalCount = 0;
+    const startTime = Date.now();
+    let hasCrashed = false;
 
     try {
         console.log(`🚀 Navigating to portal at ${process.env.URL}...`);
@@ -21,28 +31,55 @@ async function runAutomation() {
         await page.waitForLoadState('networkidle');
 
         // Track skipped patient names to prevent infinite loops on unmapped conditions
-        const skippedPatientNames = new Set();
 
         while (true) {
-            // 3a. Click the doctor dropdown and filter by NAME key
+            if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_runCount) {
+                console.log(`🛑 DEBUG MODE: Reached limit of ${CONFIG.debug_runCount} successful runs. Exiting loop.`);
+                break;
+            }
+
+            totalCount = endedVisitCount + skippedPatientNames.size;
+            console.log(`--- Starting loop ${totalCount} ---\n`);
+
+            // 3a. Click the doctor dropdown and filter by ID key
             const providerDropdown = page.locator('app-todays-consult select').first();
             await providerDropdown.waitFor({ state: 'visible' });
-            await providerDropdown.selectOption({ value: process.env.DOCTOR_ID });
+            
+            console.log("🕝 Running arbitrary wait time for patient list to fully load.");
+            await page.waitForTimeout(5000); // artificially wait to slow down
+
+            await providerDropdown.selectOption({ value: process.env.WAH_UUID });
             await page.waitForLoadState('networkidle');
 
             // Fetch the current visible list of patient rows
-            const patientRows = await page.locator('app-todays-consult .border-b.border-gray-200').all();
+            const rowLocator = page.locator('app-todays-consult .border-b.border-gray-200');
+            try {
+                await rowLocator.first().waitFor({ state: 'visible', timeout: 10000 });
+            } catch (error) {
+                console.log("📋 Detected 0 patients (Timeout reached).");
+            }
+            
+            const patientRows = await rowLocator.all();
             let targetPatientRow = null;
             let targetPatientName = "";
 
+            console.log(`📋 Detected ${patientRows.length} patients.`);
+
             // Look for the topmost unchecked person who hasn't been skipped yet
-            for (const row of patientRows) {
-                const nameCell = row.locator('span.text-sm').first();
-                const nameText = await nameCell.innerText().catch(() => "");
+            let i = 0;
+            for (i = Math.max(0, CONFIG.skipToRow); i < patientRows.length; i++) {
+                const row = patientRows[i]; 
+
+                // Get all the text inside the entire patient row card
+                const fullRowText = await row.innerText().catch(() => "");
                 
-                if (nameText && !skippedPatientNames.has(nameText.trim())) {
+                // Split the text by newlines and look for the line containing a comma 
+                const textLines = fullRowText.split('\n');
+                const nameLine = textLines.find(line => line.includes(',')); 
+
+                if (nameLine && !skippedPatientNames.has(nameLine.trim())) {
                     targetPatientRow = row;
-                    targetPatientName = nameText.trim();
+                    targetPatientName = nameLine.trim();
                     break; 
                 }
             }
@@ -53,15 +90,21 @@ async function runAutomation() {
                 break;
             }
 
-            console.log(`Processing patient: ${targetPatientName}`);
+            console.log(`\nProcessing patient #${totalCount} on Row ${i}: ${targetPatientName}`);
 
             // 3b. Click the Consultation button of the target patient
-            const consultButton = targetPatientRow.getByRole('button', { name: /consultation|cn/i });
+            const consultButton = targetPatientRow.locator('button, a, div.btn').filter({ hasText: /consultation|cn/i }).first();
             await consultButton.click();
             await page.waitForLoadState('networkidle');
 
+            console.log("🕝 Running arbitrary wait time for patient record to fully load.");
+            await page.waitForTimeout(5000); // artificially wait to slow down
+
             // 3c. Target Angular Initial Diagnosis selected chips
-            const initialDiagLocator = page.locator('app-initial-dx .ng-value-label');
+            const initialDxContainer = page.locator('app-initial-dx');
+            await initialDxContainer.waitFor({ state: 'visible', timeout: 15000 });
+
+            const initialDiagLocator = initialDxContainer.locator('.ng-value-label');
 
             // Ensure an initial diagnosis exists before proceeding
             if (await initialDiagLocator.count() === 0) {
@@ -74,7 +117,7 @@ async function runAutomation() {
             }
 
             // Retrieve selected initial diagnosis, removing trailing clear icons if any
-            const initialDiagnosisText = (await initialDiagLocator.first().innerText()).replace(/[\u00D7x]$/, '').trim();
+            const initialDiagnosisText = (await initialDiagLocator.first().innerText()).trim();
 
             // 3c1. Skip logic if the tag doesn't match our allowed mappings
             if (!DIAGNOSIS_MAP[initialDiagnosisText]) {
@@ -87,40 +130,68 @@ async function runAutomation() {
             }
 
             // 3c2. If matched -> Proceed to Final Diagnosis
-            const target = DIAGNOSIS_MAP[initialDiagnosisText];
-            console.log(`✅ Mapping to code: ${target}`);
+            const finalDiagCode = DIAGNOSIS_MAP[initialDiagnosisText];
+            console.log(`✅ Mapping to code: ${finalDiagCode}`);
             
             // 3c2a. Locate the input search bar inside the Diagnosis section
             const finalDiagInput = page.locator('app-final-dx ng-select input[type="text"]');
             await finalDiagInput.click();
             
             // 3c2b. Input the code and click the item from the dynamic search dropdown
-            await finalDiagInput.fill(target);
-            const dynamicDropdownResult = page.locator('.ng-dropdown-panel .ng-option').getByText(target, { exact: false }).first();
+            await finalDiagInput.fill(finalDiagCode);
+            const dynamicDropdownResult = page.locator('.ng-dropdown-panel .ng-option').getByText(finalDiagCode, { exact: false }).first();
             await dynamicDropdownResult.waitFor({ state: 'visible', timeout: 5000 });
+            await page.waitForTimeout(1000); // artificially wait to slow down
             await dynamicDropdownResult.click();
 
             // 3c2c. Click save strictly on the Final Diagnosis component to avoid strict mode errors
             await page.locator('app-final-dx').getByRole('button', { name: /save/i }).click();
-            
-            // 3c2d. Scroll to the top of the page
-            await page.evaluate(() => window.scrollTo(0, 0));
+            await page.waitForTimeout(1000); // artificially wait to slow down
             
             // 3c2e. Click "End Visit" on the middle section header actions
             await page.locator('.consultation-header-actions').getByRole('button', { name: /end visit/i }).first().click();
+            await page.waitForTimeout(1000); // artificially wait to slow down
 
             // 3c2f. Handle the modal/popup confirmation
             const modalEndVisitBtn = page.getByRole('dialog').getByRole('button', { name: /end visit/i });
             await modalEndVisitBtn.waitFor({ state: 'visible' });
+            await page.waitForTimeout(1000); // artificially wait to slow down
             await modalEndVisitBtn.click();
+            
+            endedVisitCount++;
 
             // 3d. Click the "Home" link icon in the upper right corner toolbar to reset the loop
             await page.locator('app-header svg[data-icon="house"]').first().click();
             await page.waitForLoadState('networkidle');
+            await page.waitForTimeout(2000); // artificially wait to slow down
         }
     } catch (error) {
         console.error("❌ Automation encountered an error:", error);
+        hasCrashed = true;
     } finally {
+        const skippedCount = skippedPatientNames.size;
+        const totalCount = endedVisitCount + skippedCount;
+        const endTime = Date.now();
+        const executionTimeSeconds = ((endTime - startTime) / 1000).toFixed(2);
+
+        let automationData = {
+            totalCount: totalCount,
+            skippedCount: skippedCount,
+            endedVisitCount: endedVisitCount,
+
+            startTime: startTime,
+            endTime: endTime,
+            executionTimeSeconds: parseFloat(executionTimeSeconds),
+            
+            successfulAutomationRun: !hasCrashed,
+
+            skippedPatientsList: Array.from(skippedPatientNames),
+        };
+
+        console.log(`🟢 AUTOMATION COMPLETE: Exiting after ${endedVisitCount} successful patients.`);
+        console.log('\n📊 --- Automation Run Summary ---');
+        console.log(JSON.stringify(automationData, null, 4));
+        
         await page.waitForTimeout(3000);
         await browser.close();
     }
