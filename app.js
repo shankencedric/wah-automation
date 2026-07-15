@@ -78,10 +78,13 @@ async function runAutomationBody(page, browser) {
 
             // PAGINATION CHECK: Check if skipped count has reached a multiple of 40 to turn the page
             let currentPage = 0;
-            const skipCount = (globalAutomationData.startedAtRow-1 + skippedPatientNames.size); // -1 because that exact row will be put into skippedPatientNames
-            const targetPage = Math.max( CONFIG.startAtPage, Math.floor( skipCount / 40 ));
+            const skipCount = (
+                globalAutomationData.startedAtPage * 40 +
+                globalAutomationData.startedAtRow-1 +
+                skippedPatientNames.size); // -1 because that exact row will be put into skippedPatientNames
+            const targetPage = Math.floor(skipCount / 40);
             while (targetPage > currentPage) {
-                console.log(`📄 Skipped count reached ${skipCount}. Turning to next page of results...`);
+                console.log(`📄 Skipped count reached ${skipCount}. Turning to page ${targetPage} of results...`);
                 
                 // Target the pagination "Next" button specifically using the text "Next" inside the nav bar
                 const nextButton = page.locator('app-todays-consult nav').getByRole('button', { name: /next/i }).first();
