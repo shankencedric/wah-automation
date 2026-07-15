@@ -30,23 +30,39 @@ async function runAutomation() {
         
         await page.waitForLoadState('networkidle');
 
-        // Track skipped patient names to prevent infinite loops on unmapped conditions
+        const currentPage = 0;
 
         while (true) {
-            if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_runCount) {
-                console.log(`🛑 DEBUG MODE: Reached limit of ${CONFIG.debug_runCount} successful runs. Exiting loop.`);
+            if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
+                console.log(`🛑 DEBUG MODE: Reached limit of ${CONFIG.debug_endedVisitTargetCount} successful runs. Exiting loop.`);
                 break;
             }
 
             totalCount = endedVisitCount + skippedPatientNames.size;
             console.log(`--- Starting loop ${totalCount} ---\n`);
 
+            // PAGINATION CHECK: Check if skipped count has reached a multiple of 40 to turn the page
+            const expectedPage = Math.floor(skippedPatientNames.size / 40);
+            if (expectedPage > currentPage) {
+                console.log(`📄 Skipped count reached ${skippedPatientNames.size}. Turning to next page of results...`);
+                
+                // Target the pagination "Next" button specifically using the text "Next" inside the nav bar
+                const nextButton = page.locator('app-pending-fdx nav').getByRole('button', { name: /next/i }).first();
+                await nextButton.waitFor({ state: 'visible' });
+                await nextButton.click();
+                await page.waitForLoadState('networkidle');
+
+                currentPage++;
+                console.log(`⏩ Now on page #${currentPage}`);
+                continue;
+            }
+
             // 3a. Click the doctor dropdown and filter by ID key
             const providerDropdown = page.locator('app-todays-consult select').first();
             await providerDropdown.waitFor({ state: 'visible' });
             
             console.log("🕝 Running arbitrary wait time for patient list to fully load.");
-            await page.waitForTimeout(5000); // artificially wait to slow down
+            await page.waitForTimeout(3000); // artificially wait to slow down
 
             await providerDropdown.selectOption({ value: process.env.WAH_UUID });
             await page.waitForLoadState('networkidle');
