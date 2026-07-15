@@ -13,7 +13,8 @@ let globalAutomationData = {
     endedVisitCount: 0,
     executionTimeSeconds: 0,
     attempts: 0,
-    startedAtRow: CONFIG.skipToRow,
+    startedAtRow: CONFIG.startAtRow,
+    startedAtPage: CONFIG.startAtPage,
     skippedPatientsList: []
 };
 
@@ -54,6 +55,8 @@ async function runAutomationBody(page, browser) {
     let hasCrashed = false;
 
     try {
+        console.log(`\n🔢 Will start at row ${CONFIG.startAtRow} on page ${CONFIG.startAtPage}...\n`);
+
         while (true) {
             if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
                 console.log(`🛑 DEBUG MODE: Reached limit of ${CONFIG.debug_endedVisitTargetCount} successful runs. Exiting loop.`);
@@ -61,24 +64,7 @@ async function runAutomationBody(page, browser) {
             }
 
             totalCount = endedVisitCount + skippedPatientNames.size;
-            console.log(`--- Starting loop ${totalCount} ---\n`);
-
-            // PAGINATION CHECK: Check if skipped count has reached a multiple of 40 to turn the page
-            const currentPage = 0;
-            const expectedPage = Math.floor((globalAutomationData.startedAtRow + skippedPatientNames.size) / 40);
-            while (expectedPage > currentPage) {
-                console.log(`📄 Skipped count reached ${skippedPatientNames.size}. Turning to next page of results...`);
-                
-                // Target the pagination "Next" button specifically using the text "Next" inside the nav bar
-                const nextButton = page.locator('app-pending-fdx nav').getByRole('button', { name: /next/i }).first();
-                await nextButton.waitFor({ state: 'visible' });
-                await nextButton.click();
-                await page.waitForLoadState('networkidle');
-                await page.waitForTimeout(5000); // artificially wait to slow down
-
-                currentPage++;
-                console.log(`⏩ Now on page #${currentPage}`);
-            }
+            console.log(`--- Starting loop ${totalCount} ---`);
 
             // 3a. Click the doctor dropdown and filter by ID key
             const providerDropdown = page.locator('app-todays-consult select').first();
@@ -89,6 +75,32 @@ async function runAutomationBody(page, browser) {
 
             await providerDropdown.selectOption({ value: process.env.WAH_UUID });
             await page.waitForLoadState('networkidle');
+
+            // PAGINATION CHECK: Check if skipped count has reached a multiple of 40 to turn the page
+            let currentPage = 0;
+            const skipCount = (globalAutomationData.startedAtRow-1 + skippedPatientNames.size); // -1 because that exact row will be put into skippedPatientNames
+            const targetPage = Math.max( CONFIG.startAtPage, Math.floor( skipCount / 40 ));
+            while (targetPage > currentPage) {
+                console.log(`📄 Skipped count reached ${skipCount}. Turning to next page of results...`);
+                
+                // Target the pagination "Next" button specifically using the text "Next" inside the nav bar
+                const nextButton = page.locator('app-todays-consult nav').getByRole('button', { name: /next/i }).first();
+                await nextButton.waitFor({ state: 'visible' });
+
+                // 🛑 LAST PAGE CHECK: End automation if we need to turn the page but the button is disabled
+                if (await nextButton.isDisabled()) {
+                    console.log("🛑 'Next' button is disabled. We have reached the final page of records.");
+                    break;
+                }
+                
+                // Next page
+                await nextButton.click();
+                await page.waitForLoadState('networkidle');
+                await page.waitForTimeout(5000); // artificially wait to slow down
+
+                currentPage++;
+                console.log(`⏩ Now on page #${currentPage}`);
+            }
 
             // Fetch the current visible list of patient rows
             const rowLocator = page.locator('app-todays-consult .border-b.border-gray-200');
@@ -105,9 +117,10 @@ async function runAutomationBody(page, browser) {
             console.log(`📋 Detected ${patientRows.length} patients.`);
 
             // Look for the topmost unchecked person who hasn't been skipped yet
-            let rowIdx = 0;
-            for (rowIdx = Math.max(0, CONFIG.startAtRow+1); rowIdx < patientRows.length; rowIdx++) {
-                const row = patientRows[rowIdx]; 
+            const validRowSkip = Math.max(1, CONFIG.startAtRow); // 1-indexed
+            let rowIdx = targetPage > CONFIG.startAtPage ? 1 : validRowSkip; // if beyond the starting page, no more skip
+            for (; rowIdx <= patientRows.length; rowIdx++) {
+                const row = patientRows[rowIdx-1]; 
 
                 // Get all the text inside the entire patient row card
                 const fullRowText = await row.innerText().catch(() => "");
