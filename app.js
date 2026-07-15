@@ -45,7 +45,7 @@ async function clickHomeButton(page) {
     await page.waitForTimeout(2000); // artificially wait to slow down
 }
 
-function logger(toLog) {
+function logger(toLog, error = null) {
     const timeString = new Date().toLocaleString('en-US', {
         month: 'short',
         day: '2-digit',
@@ -54,7 +54,11 @@ function logger(toLog) {
         second: '2-digit',
         hour12: true
     });
-    console.log(`[${timeString}] ${toLog}`);
+
+    const print = `[${timeString}] ${toLog}`;
+
+    if (error) console.error(print);
+    else console.log(print);
 }
 
 async function runAutomationBody(page, browser) {
@@ -67,7 +71,7 @@ async function runAutomationBody(page, browser) {
     let hasCrashed = false;
 
     try {
-        logger(`\n🔢 Will start at row ${CONFIG.startAtRow} on page ${CONFIG.startAtPage}...\n`);
+        logger(`🔢 Will start at row ${CONFIG.startAtRow} on page ${CONFIG.startAtPage}...\n`);
 
         while (true) {
             if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
@@ -78,11 +82,11 @@ async function runAutomationBody(page, browser) {
             totalCount = endedVisitCount + skippedPatientNames.size;
             logger(`--- Starting loop ${totalCount} ---`);
 
-            // 3a. Click the doctor dropdown and filter by ID key
+            // SELECT doctors from dropdown
             const providerDropdown = page.locator('app-todays-consult select').first();
             await providerDropdown.waitFor({ state: 'visible' });
             
-            logger("🕝 Running arbitrary wait time for patient list to fully load.");
+            logger("🕝 Running arbitrary wait time for patient list to fully load...");
             await page.waitForTimeout(5000); // artificially wait to slow down
 
             await providerDropdown.selectOption({ value: process.env.WAH_UUID });
@@ -105,6 +109,8 @@ async function runAutomationBody(page, browser) {
                 // 🛑 LAST PAGE CHECK: End automation if we need to turn the page but the button is disabled
                 if (await nextButton.isDisabled()) {
                     logger("🛑 'Next' button is disabled. We have reached the final page of records.");
+                    logger("🕝 Running arbitrary wait time for patient list to fully load...");
+                    await page.waitForTimeout(5000); // artificially wait to slow down
                     break;
                 }
                 
@@ -115,7 +121,7 @@ async function runAutomationBody(page, browser) {
                 currentPage++;
                 logger(`⏩ Now on page #${currentPage}`);
 
-                logger("🕝 Running arbitrary wait time for patient list to fully load.");
+                logger("🕝 Running arbitrary wait time for patient list to fully load...");
                 await page.waitForTimeout(5000); // artificially wait to slow down
             }
 
@@ -159,14 +165,15 @@ async function runAutomationBody(page, browser) {
                 break;
             }
 
-            logger(`\nProcessing patient #${totalCount} on Row ${rowIdx}: ${targetPatientName}`);
+            logger(" ");
+            logger(`🧑‍💻 Processing patient #${totalCount} on Row ${rowIdx}: ${targetPatientName}...`);
 
             // 3b. Click the Consultation button of the target patient
             const consultButton = targetPatientRow.locator('button, a, div.btn').filter({ hasText: /consultation/i }).first();
             await consultButton.click();
             await page.waitForLoadState('networkidle');
 
-            logger("🕝 Running arbitrary wait time for patient record to fully load.");
+            logger("🕝 Running arbitrary wait time for patient record to fully load...");
             await page.waitForTimeout(5000); // artificially wait to slow down
 
             // 3c. Target Angular Initial Diagnosis selected chips
@@ -177,7 +184,7 @@ async function runAutomationBody(page, browser) {
 
             // Ensure an initial diagnosis exists before proceeding
             if (await initialDiagLocator.count() === 0) {
-                logger(`⚠️ No initial diagnosis found for ${targetPatientName}. Skipping.`);
+                logger(`⚠️ No initial diagnosis found. Skipping...`);
                 skippedPatientNames.add(targetPatientName);
                 
                 // Click "Home" link icon to reset
@@ -185,38 +192,51 @@ async function runAutomationBody(page, browser) {
                 continue;
             }
 
-            // Retrieve selected initial diagnosis, removing trailing clear icons if any
-            const initialDiagnosisText = (await initialDiagLocator.first().innerText()).trim();
+            // Retrieve ALL selected initial diagnoses as an array of texts
+            const initialDiagnoses = await initialDiagLocator.allInnerTexts();
+            
+            // Find each mapping
+            let finalDiagnosisCodes = [];
+            for (let text of initialDiagnoses) {
+                const cleanText = text.trim();
+                finalDiagnosisCodes.push(DIAGNOSIS_MAP[cleanText]);
+            }
 
-            // 3c1. Skip logic if the tag doesn't match our allowed mappings
-            if (!DIAGNOSIS_MAP[initialDiagnosisText]) {
-                logger(`⚠️ Unmapped diagnosis [${initialDiagnosisText}]. Skipping.`);
+            // If ANY tag is unmapped, skip the entire patient
+            if (finalDiagnosisCodes.length === initialDiagnoses.length) {
+                logger(`⚠️ Diagnoses found: [${initialDiagnoses.join(", ")}], but at least one is unmapped. Skipping...`);
                 skippedPatientNames.add(targetPatientName);
                 
-                // 3d. Click Home button 
                 await clickHomeButton(page);
                 continue;
             }
 
-            // 3c2. If matched -> Proceed to Final Diagnosis
-            const finalDiagCode = DIAGNOSIS_MAP[initialDiagnosisText];
-            logger(`✅ Mapping to code: ${finalDiagCode}`);
-            
-            // 3c2a. Locate the input search bar inside the Diagnosis section
-            const finalDiagInput = page.locator('app-final-dx ng-select input[type="text"]');
-            await finalDiagInput.click();
-            
-            // 3c2b. Input the code and click the item from the dynamic search dropdown
-            await finalDiagInput.fill(finalDiagCode);
-            const dynamicDropdownResult = page.locator('.ng-dropdown-panel .ng-option').getByText(finalDiagCode, { exact: false }).first();
-            await dynamicDropdownResult.waitFor({ state: 'visible', timeout: 5000 });
-            await page.waitForTimeout(1000); // artificially wait to slow down
-            await dynamicDropdownResult.click();
+            // Remove duplicate final codes
+            const uniqueFinalCodes = [...new Set(finalDiagnosisCodes)];
 
-            // 3c2c. Click save strictly on the Final Diagnosis component to avoid strict mode errors
+            // 3c2. If ALL are matched -> Proceed to Final Diagnosis for each code
+            for (let i = 0; i < initialDiagnoses.length; i++) {
+                logger(`✅ Mapping diagnosis "${initialDiagnoses[i]}" to code: ${finalDiagnosisCodes[i]}...`);
+                
+                // Locate the input search bar inside the Diagnosis section
+                const finalDiagInput = page.locator('app-final-dx ng-select input[type="text"]');
+                await finalDiagInput.waitFor({ state: 'visible', timeout: 15000 });
+                await finalDiagInput.click();
+                
+                // Input the code and click the item from the dynamic search dropdown
+                await finalDiagInput.fill(finalDiagnosisCodes[i]);
+                const dynamicDropdownResult = page.locator('.ng-dropdown-panel .ng-option').getByText(finalDiagnosisCodes[i], { exact: false }).first();
+                await dynamicDropdownResult.waitFor({ state: 'visible', timeout: 5000 });
+                await page.waitForTimeout(1000); // artificially wait to slow down
+                await dynamicDropdownResult.click();
+                
+                await page.waitForTimeout(500); // brief pause before typing the next code
+            }
+
+            // 3c2c. Click save strictly on the Final Diagnosis component AFTER all tags are added
             await page.locator('app-final-dx').getByRole('button', { name: /save/i }).click();
             await page.waitForTimeout(1000); // artificially wait to slow down
-            
+
             // 3c2e. Click "End Visit" on the middle section header actions
             await page.locator('.consultation-header-actions').getByRole('button', { name: /end visit/i }).first().click();
             await page.waitForTimeout(1000); // artificially wait to slow down
@@ -233,7 +253,7 @@ async function runAutomationBody(page, browser) {
             await clickHomeButton(page);
         }
     } catch (error) {
-        console.error("❌ Automation encountered an error:", error);
+        logger("❌ Automation encountered an error:", error);
         hasCrashed = true;
     } finally {
         
@@ -258,9 +278,9 @@ async function runAutomationBody(page, browser) {
 
         if (hasCrashed && CONFIG.attemptReload && reloadCount < CONFIG.reloadAttempts)
         {
-            console.warn(`⚠️ Error received. Restarting automation (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
+            logger(`⚠️ Error received. Restarting automation (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
             
-            logger(`\n📊 --- Automation Run Summary (Attempt ${reloadCount}) ---`);
+            logger(`📊 --- Automation Run Summary (Attempt ${reloadCount}) ---`);
             logger(JSON.stringify(automationDataThisRun, null, 4));
             
             await page.waitForTimeout(3000);
@@ -271,10 +291,10 @@ async function runAutomationBody(page, browser) {
         else {
             globalAutomationData.attempts = reloadCount;
 
-            logger('\n📊 --- Automation Run Summary (Complete) ---');
+            logger('📊 --- Automation Run Summary (Complete) ---');
             logger(JSON.stringify(globalAutomationData, null, 4));
             
-            logger(`🟢 AUTOMATION COMPLETE: Exiting after ${globalAutomationData.endedVisitCount} successful end visits.`);
+            logger(`🟢 AUTOMATION COMPLETE: Exiting after ${globalAutomationData.endedVisitCount} successful end visits...`);
             await page.waitForTimeout(3000);
             await browser.close();
         }
