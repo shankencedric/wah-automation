@@ -48,7 +48,7 @@ async function runAutomationBody(page, browser) {
 
     // Some automation data for THIS run
     let endedVisitCount = 0;
-    const skippedPatientNames = Set.from(globalAutomationData.skippedPatientsList);
+    const skippedPatientNames = new Set(globalAutomationData.skippedPatientsList);
     let totalCount = 0;
     const startTime = Date.now();
     let hasCrashed = false;
@@ -106,7 +106,7 @@ async function runAutomationBody(page, browser) {
 
             // Look for the topmost unchecked person who hasn't been skipped yet
             let rowIdx = 0;
-            for (rowIdx = Math.max(0, CONFIG.startAtRow-1); rowIdx < patientRows.length; rowIdx++) {
+            for (rowIdx = Math.max(0, CONFIG.startAtRow+1); rowIdx < patientRows.length; rowIdx++) {
                 const row = patientRows[rowIdx]; 
 
                 // Get all the text inside the entire patient row card
@@ -228,13 +228,15 @@ async function runAutomationBody(page, browser) {
 
         if (hasCrashed && CONFIG.attemptReload && reloadCount < CONFIG.reloadAttempts)
         {
-            console.warn(`⚠️ Error received. Reloading page (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
-            await clickHomeButton(page);
-
+            console.warn(`⚠️ Error received. Restarting automation (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
+            
             console.log(`\n📊 --- Automation Run Summary (Attempt ${reloadCount}) ---`);
             console.log(JSON.stringify(automationDataThisRun, null, 4));
+            
+            await page.waitForTimeout(3000);
+            await browser.close();
+            await startAutomation();
 
-            await runAutomationBody(page, browser);
         }
         else {
             globalAutomationData.attempts = reloadCount;
