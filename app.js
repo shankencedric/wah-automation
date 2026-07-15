@@ -6,6 +6,8 @@ const DIAGNOSIS_MAP = require('./diagnoses.json');
 
 const CONFIG = require('./config.json');
 
+let reloadOnRateLimitCount = 0; 
+
 async function runAutomation() {
     
     const browser = await chromium.launch({ headless: false, slowMo: CONFIG.debug_mode ? 200 : 50 });
@@ -30,7 +32,6 @@ async function runAutomation() {
         
         await page.waitForLoadState('networkidle');
 
-        const currentPage = 0;
 
         while (true) {
             if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
@@ -42,8 +43,9 @@ async function runAutomation() {
             console.log(`--- Starting loop ${totalCount} ---\n`);
 
             // PAGINATION CHECK: Check if skipped count has reached a multiple of 40 to turn the page
+            const currentPage = 0;
             const expectedPage = Math.floor(skippedPatientNames.size / 40);
-            if (expectedPage > currentPage) {
+            while (expectedPage > currentPage) {
                 console.log(`📄 Skipped count reached ${skippedPatientNames.size}. Turning to next page of results...`);
                 
                 // Target the pagination "Next" button specifically using the text "Next" inside the nav bar
@@ -51,10 +53,10 @@ async function runAutomation() {
                 await nextButton.waitFor({ state: 'visible' });
                 await nextButton.click();
                 await page.waitForLoadState('networkidle');
+                await page.waitForTimeout(5000); // artificially wait to slow down
 
                 currentPage++;
                 console.log(`⏩ Now on page #${currentPage}`);
-                continue;
             }
 
             // 3a. Click the doctor dropdown and filter by ID key
