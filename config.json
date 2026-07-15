@@ -1,7 +1,7 @@
 {
-    "skipToRow" : 21,
+    "startAtRow" : 23,
     
-    "attemptReloadOnRateLimitError" : true,
+    "attemptReload" : true,
     "reloadAttempts" : 5,
 
     "debug_mode": true,

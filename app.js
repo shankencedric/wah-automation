@@ -6,33 +6,54 @@ const DIAGNOSIS_MAP = require('./diagnoses.json');
 
 const CONFIG = require('./config.json');
 
-let reloadOnRateLimitCount = 0; 
+let reloadCount = 0; 
+let globalAutomationData = {
+    totalCount: 0,
+    skippedCount: 0,
+    endedVisitCount: 0,
+    executionTimeSeconds: 0,
+    attempts: 0,
+    startedAtRow: CONFIG.skipToRow,
+    skippedPatientsList: []
+};
 
-async function runAutomation() {
-    
+async function startAutomation() {
     const browser = await chromium.launch({ headless: false, slowMo: CONFIG.debug_mode ? 200 : 50 });
     const context = await browser.newContext();
     const page = await context.newPage();
 
-    // Some automation data
+    await tryLogIn(page);
+    await runAutomationBody(page, browser);
+}
+
+async function tryLogIn(page) {
+    console.log(`🚀 Navigating to portal at ${process.env.URL}...`);
+    await page.goto(process.env.URL);
+
+    // 1. Log In using EMAIL and PASSWORD keys
+    await page.locator('input[type="email"], input[type="text"]').first().fill(process.env.EMAIL);
+    await page.locator('input[type="password"]').first().fill(process.env.PASSWORD);
+    await page.getByRole('button', { name: /sign in/i }).click();
+    
+    await page.waitForLoadState('networkidle');
+}
+
+async function clickHomeButton(page) {
+    await page.locator('app-header svg[data-icon="house"]').first().click();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000); // artificially wait to slow down
+}
+
+async function runAutomationBody(page, browser) {
+
+    // Some automation data for THIS run
     let endedVisitCount = 0;
-    const skippedPatientNames = new Set();
+    const skippedPatientNames = Set.from(globalAutomationData.skippedPatientsList);
     let totalCount = 0;
     const startTime = Date.now();
     let hasCrashed = false;
 
     try {
-        console.log(`🚀 Navigating to portal at ${process.env.URL}...`);
-        await page.goto(process.env.URL);
-
-        // 1. Log In using EMAIL and PASSWORD keys
-        await page.locator('input[type="email"], input[type="text"]').first().fill(process.env.EMAIL);
-        await page.locator('input[type="password"]').first().fill(process.env.PASSWORD);
-        await page.getByRole('button', { name: /sign in/i }).click();
-        
-        await page.waitForLoadState('networkidle');
-
-
         while (true) {
             if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
                 console.log(`🛑 DEBUG MODE: Reached limit of ${CONFIG.debug_endedVisitTargetCount} successful runs. Exiting loop.`);
@@ -44,7 +65,7 @@ async function runAutomation() {
 
             // PAGINATION CHECK: Check if skipped count has reached a multiple of 40 to turn the page
             const currentPage = 0;
-            const expectedPage = Math.floor(skippedPatientNames.size / 40);
+            const expectedPage = Math.floor((globalAutomationData.startedAtRow + skippedPatientNames.size) / 40);
             while (expectedPage > currentPage) {
                 console.log(`📄 Skipped count reached ${skippedPatientNames.size}. Turning to next page of results...`);
                 
@@ -85,7 +106,7 @@ async function runAutomation() {
 
             // Look for the topmost unchecked person who hasn't been skipped yet
             let rowIdx = 0;
-            for (rowIdx = Math.max(0, CONFIG.skipToRow); rowIdx < patientRows.length; rowIdx++) {
+            for (rowIdx = Math.max(0, CONFIG.startAtRow-1); rowIdx < patientRows.length; rowIdx++) {
                 const row = patientRows[rowIdx]; 
 
                 // Get all the text inside the entire patient row card
@@ -130,7 +151,7 @@ async function runAutomation() {
                 skippedPatientNames.add(targetPatientName);
                 
                 // Click "Home" link icon to reset
-                await page.locator('app-header svg[data-icon="house"]').first().click();
+                await clickHomeButton(page);
                 continue;
             }
 
@@ -143,7 +164,7 @@ async function runAutomation() {
                 skippedPatientNames.add(targetPatientName);
                 
                 // 3d. Click Home button 
-                await page.locator('app-header svg[data-icon="house"]').first().click();
+                await clickHomeButton(page);
                 continue;
             }
 
@@ -179,40 +200,53 @@ async function runAutomation() {
             endedVisitCount++;
 
             // 3d. Click the "Home" link icon in the upper right corner toolbar to reset the loop
-            await page.locator('app-header svg[data-icon="house"]').first().click();
-            await page.waitForLoadState('networkidle');
-            await page.waitForTimeout(2000); // artificially wait to slow down
+            await clickHomeButton(page);
         }
     } catch (error) {
         console.error("❌ Automation encountered an error:", error);
         hasCrashed = true;
     } finally {
+        
         const skippedCount = skippedPatientNames.size;
         const totalCount = endedVisitCount + skippedCount;
         const endTime = Date.now();
         const executionTimeSeconds = ((endTime - startTime) / 1000).toFixed(2);
-
-        let automationData = {
+        
+        automationDataThisRun = {
             totalCount: totalCount,
             skippedCount: skippedCount,
             endedVisitCount: endedVisitCount,
-
-            startTime: startTime,
-            endTime: endTime,
             executionTimeSeconds: parseFloat(executionTimeSeconds),
-            
-            successfulAutomationRun: !hasCrashed,
-
             skippedPatientsList: Array.from(skippedPatientNames),
         };
 
-        console.log(`🟢 AUTOMATION COMPLETE: Exiting after ${endedVisitCount} successful patients.`);
-        console.log('\n📊 --- Automation Run Summary ---');
-        console.log(JSON.stringify(automationData, null, 4));
-        
-        await page.waitForTimeout(3000);
-        await browser.close();
+        globalAutomationData.totalCount += automationDataThisRun.totalCount;
+        globalAutomationData.skippedCount += automationDataThisRun.skippedCount;
+        globalAutomationData.endedVisitCount += automationDataThisRun.endedVisitCount;
+        globalAutomationData.executionTimeSeconds += automationDataThisRun.executionTimeSeconds;
+        globalAutomationData.skippedPatientsList = [...globalAutomationData.skippedPatientsList, ...automationDataThisRun.skippedPatientsList];
+
+        if (hasCrashed && CONFIG.attemptReload && reloadCount < CONFIG.reloadAttempts)
+        {
+            console.warn(`⚠️ Error received. Reloading page (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
+            await clickHomeButton(page);
+
+            console.log(`\n📊 --- Automation Run Summary (Attempt ${reloadCount}) ---`);
+            console.log(JSON.stringify(automationDataThisRun, null, 4));
+
+            await runAutomationBody(page, browser);
+        }
+        else {
+            globalAutomationData.attempts = reloadCount;
+
+            console.log('\n📊 --- Automation Run Summary (Complete) ---');
+            console.log(JSON.stringify(globalAutomationData, null, 4));
+            
+            console.log(`🟢 AUTOMATION COMPLETE: Exiting after ${globalAutomationData.endedVisitCount} successful end visits.`);
+            await page.waitForTimeout(3000);
+            await browser.close();
+        }
     }
 }
 
-runAutomation();
+startAutomation();
