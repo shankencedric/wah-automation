@@ -28,7 +28,7 @@ async function startAutomation() {
 }
 
 async function tryLogIn(page) {
-    console.log(`🚀 Navigating to portal at ${process.env.URL}...`);
+    logger(`🚀 Navigating to portal at ${process.env.URL}...`);
     await page.goto(process.env.URL);
 
     // 1. Log In using EMAIL and PASSWORD keys
@@ -45,6 +45,18 @@ async function clickHomeButton(page) {
     await page.waitForTimeout(2000); // artificially wait to slow down
 }
 
+function logger(toLog) {
+    const timeString = new Date().toLocaleString('en-US', {
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+    });
+    console.log(`[${timeString}] ${toLog}`);
+}
+
 async function runAutomationBody(page, browser) {
 
     // Some automation data for THIS run
@@ -55,22 +67,22 @@ async function runAutomationBody(page, browser) {
     let hasCrashed = false;
 
     try {
-        console.log(`\n🔢 Will start at row ${CONFIG.startAtRow} on page ${CONFIG.startAtPage}...\n`);
+        logger(`\n🔢 Will start at row ${CONFIG.startAtRow} on page ${CONFIG.startAtPage}...\n`);
 
         while (true) {
             if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
-                console.log(`🛑 DEBUG MODE: Reached limit of ${CONFIG.debug_endedVisitTargetCount} successful runs. Exiting loop.`);
+                logger(`🛑 DEBUG MODE: Reached limit of ${CONFIG.debug_endedVisitTargetCount} successful runs. Exiting loop.`);
                 break;
             }
 
             totalCount = endedVisitCount + skippedPatientNames.size;
-            console.log(`--- Starting loop ${totalCount} ---`);
+            logger(`--- Starting loop ${totalCount} ---`);
 
             // 3a. Click the doctor dropdown and filter by ID key
             const providerDropdown = page.locator('app-todays-consult select').first();
             await providerDropdown.waitFor({ state: 'visible' });
             
-            console.log("🕝 Running arbitrary wait time for patient list to fully load.");
+            logger("🕝 Running arbitrary wait time for patient list to fully load.");
             await page.waitForTimeout(5000); // artificially wait to slow down
 
             await providerDropdown.selectOption({ value: process.env.WAH_UUID });
@@ -84,7 +96,7 @@ async function runAutomationBody(page, browser) {
                 skippedPatientNames.size); // -1 because that exact row will be put into skippedPatientNames
             const targetPage = Math.floor(skipCount / 40);
             while (targetPage > currentPage) {
-                console.log(`📄 Skipped count reached ${skipCount}. Turning to page ${targetPage} of results...`);
+                logger(`📄 Skipped count reached ${skipCount}. Turning to page ${targetPage} of results...`);
                 
                 // Target the pagination "Next" button specifically using the text "Next" inside the nav bar
                 const nextButton = page.locator('app-todays-consult nav').getByRole('button', { name: /next/i }).first();
@@ -92,7 +104,7 @@ async function runAutomationBody(page, browser) {
 
                 // 🛑 LAST PAGE CHECK: End automation if we need to turn the page but the button is disabled
                 if (await nextButton.isDisabled()) {
-                    console.log("🛑 'Next' button is disabled. We have reached the final page of records.");
+                    logger("🛑 'Next' button is disabled. We have reached the final page of records.");
                     break;
                 }
                 
@@ -101,9 +113,9 @@ async function runAutomationBody(page, browser) {
                 await page.waitForLoadState('networkidle');
 
                 currentPage++;
-                console.log(`⏩ Now on page #${currentPage}`);
+                logger(`⏩ Now on page #${currentPage}`);
 
-                console.log("🕝 Running arbitrary wait time for patient list to fully load.");
+                logger("🕝 Running arbitrary wait time for patient list to fully load.");
                 await page.waitForTimeout(5000); // artificially wait to slow down
             }
 
@@ -112,14 +124,14 @@ async function runAutomationBody(page, browser) {
             try {
                 await rowLocator.first().waitFor({ state: 'visible', timeout: 10000 });
             } catch (error) {
-                console.log("📋 Detected 0 patients (Timeout reached).");
+                logger("📋 Detected 0 patients (Timeout reached).");
             }
             
             const patientRows = await rowLocator.all();
             let targetPatientRow = null;
             let targetPatientName = "";
 
-            console.log(`📋 Detected ${patientRows.length} patients.`);
+            logger(`📋 Detected ${patientRows.length} patients.`);
 
             // Look for the topmost unchecked person who hasn't been skipped yet
             const validRowSkip = Math.max(1, CONFIG.startAtRow); // 1-indexed
@@ -143,18 +155,18 @@ async function runAutomationBody(page, browser) {
 
             // If no un-skipped patients are found, the queue is clear
             if (!targetPatientRow) {
-                console.log("🎉 All eligible patient records processed or skipped!");
+                logger("🎉 All eligible patient records processed or skipped!");
                 break;
             }
 
-            console.log(`\nProcessing patient #${totalCount} on Row ${rowIdx}: ${targetPatientName}`);
+            logger(`\nProcessing patient #${totalCount} on Row ${rowIdx}: ${targetPatientName}`);
 
             // 3b. Click the Consultation button of the target patient
             const consultButton = targetPatientRow.locator('button, a, div.btn').filter({ hasText: /consultation/i }).first();
             await consultButton.click();
             await page.waitForLoadState('networkidle');
 
-            console.log("🕝 Running arbitrary wait time for patient record to fully load.");
+            logger("🕝 Running arbitrary wait time for patient record to fully load.");
             await page.waitForTimeout(5000); // artificially wait to slow down
 
             // 3c. Target Angular Initial Diagnosis selected chips
@@ -165,7 +177,7 @@ async function runAutomationBody(page, browser) {
 
             // Ensure an initial diagnosis exists before proceeding
             if (await initialDiagLocator.count() === 0) {
-                console.log(`⚠️ No initial diagnosis found for ${targetPatientName}. Skipping.`);
+                logger(`⚠️ No initial diagnosis found for ${targetPatientName}. Skipping.`);
                 skippedPatientNames.add(targetPatientName);
                 
                 // Click "Home" link icon to reset
@@ -178,7 +190,7 @@ async function runAutomationBody(page, browser) {
 
             // 3c1. Skip logic if the tag doesn't match our allowed mappings
             if (!DIAGNOSIS_MAP[initialDiagnosisText]) {
-                console.log(`⚠️ Unmapped diagnosis [${initialDiagnosisText}]. Skipping.`);
+                logger(`⚠️ Unmapped diagnosis [${initialDiagnosisText}]. Skipping.`);
                 skippedPatientNames.add(targetPatientName);
                 
                 // 3d. Click Home button 
@@ -188,7 +200,7 @@ async function runAutomationBody(page, browser) {
 
             // 3c2. If matched -> Proceed to Final Diagnosis
             const finalDiagCode = DIAGNOSIS_MAP[initialDiagnosisText];
-            console.log(`✅ Mapping to code: ${finalDiagCode}`);
+            logger(`✅ Mapping to code: ${finalDiagCode}`);
             
             // 3c2a. Locate the input search bar inside the Diagnosis section
             const finalDiagInput = page.locator('app-final-dx ng-select input[type="text"]');
@@ -248,8 +260,8 @@ async function runAutomationBody(page, browser) {
         {
             console.warn(`⚠️ Error received. Restarting automation (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
             
-            console.log(`\n📊 --- Automation Run Summary (Attempt ${reloadCount}) ---`);
-            console.log(JSON.stringify(automationDataThisRun, null, 4));
+            logger(`\n📊 --- Automation Run Summary (Attempt ${reloadCount}) ---`);
+            logger(JSON.stringify(automationDataThisRun, null, 4));
             
             await page.waitForTimeout(3000);
             await browser.close();
@@ -259,10 +271,10 @@ async function runAutomationBody(page, browser) {
         else {
             globalAutomationData.attempts = reloadCount;
 
-            console.log('\n📊 --- Automation Run Summary (Complete) ---');
-            console.log(JSON.stringify(globalAutomationData, null, 4));
+            logger('\n📊 --- Automation Run Summary (Complete) ---');
+            logger(JSON.stringify(globalAutomationData, null, 4));
             
-            console.log(`🟢 AUTOMATION COMPLETE: Exiting after ${globalAutomationData.endedVisitCount} successful end visits.`);
+            logger(`🟢 AUTOMATION COMPLETE: Exiting after ${globalAutomationData.endedVisitCount} successful end visits.`);
             await page.waitForTimeout(3000);
             await browser.close();
         }
