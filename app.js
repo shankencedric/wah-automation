@@ -71,7 +71,7 @@ async function runAutomationBody(page, browser) {
             await providerDropdown.waitFor({ state: 'visible' });
             
             console.log("🕝 Running arbitrary wait time for patient list to fully load.");
-            await page.waitForTimeout(3000); // artificially wait to slow down
+            await page.waitForTimeout(5000); // artificially wait to slow down
 
             await providerDropdown.selectOption({ value: process.env.WAH_UUID });
             await page.waitForLoadState('networkidle');
@@ -99,10 +99,12 @@ async function runAutomationBody(page, browser) {
                 // Next page
                 await nextButton.click();
                 await page.waitForLoadState('networkidle');
-                await page.waitForTimeout(5000); // artificially wait to slow down
 
                 currentPage++;
                 console.log(`⏩ Now on page #${currentPage}`);
+
+                console.log("🕝 Running arbitrary wait time for patient list to fully load.");
+                await page.waitForTimeout(5000); // artificially wait to slow down
             }
 
             // Fetch the current visible list of patient rows
@@ -148,7 +150,7 @@ async function runAutomationBody(page, browser) {
             console.log(`\nProcessing patient #${totalCount} on Row ${rowIdx}: ${targetPatientName}`);
 
             // 3b. Click the Consultation button of the target patient
-            const consultButton = targetPatientRow.locator('button, a, div.btn').filter({ hasText: /consultation|cn/i }).first();
+            const consultButton = targetPatientRow.locator('button, a, div.btn').filter({ hasText: /consultation/i }).first();
             await consultButton.click();
             await page.waitForLoadState('networkidle');
 
