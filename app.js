@@ -57,7 +57,7 @@ function logger(toLog, error = null) {
 
     const print = `[${timeString}] ${toLog}`;
 
-    if (error) console.error(print);
+    if (error) console.error(print, error);
     else console.log(print);
 }
 
@@ -199,24 +199,42 @@ async function runAutomationBody(page, browser) {
             let finalDiagnosisCodes = [];
             for (let text of initialDiagnoses) {
                 const cleanText = text.trim();
-                finalDiagnosisCodes.push(DIAGNOSIS_MAP[cleanText]);
+                if (DIAGNOSIS_MAP[cleanText])
+                    finalDiagnosisCodes.push(DIAGNOSIS_MAP[cleanText]);
             }
 
-            // If ANY tag is unmapped, skip the entire patient
-            if (finalDiagnosisCodes.length === initialDiagnoses.length) {
-                logger(`⚠️ Diagnoses found: [${initialDiagnoses.join(", ")}], but at least one is unmapped. Skipping...`);
+            // Ensure a final diagnosis exists before proceeding
+            if (finalDiagnosisCodes.length === 0) {
+                logger(`⚠️ Found initial diagnoses: [${initialDiagnoses.join(", ")}]. However, all of them are unmapped. Skipping...`);
                 skippedPatientNames.add(targetPatientName);
                 
+                // Click "Home" link icon to reset
                 await clickHomeButton(page);
                 continue;
             }
+            else if (finalDiagnosisCodes.length !== initialDiagnoses.length)
+                logger(`⚠️ Found initial diagnoses: [${initialDiagnoses.join(", ")}]. However, at least one is unmapped. Proceeding to input the valid final diagnoses: [${finalDiagnosisCodes.join(", ")}], and this will NOT end the visit...`);
 
+            
             // Remove duplicate final codes
             const uniqueFinalCodes = [...new Set(finalDiagnosisCodes)];
 
-            // 3c2. If ALL are matched -> Proceed to Final Diagnosis for each code
-            for (let i = 0; i < initialDiagnoses.length; i++) {
-                logger(`✅ Mapping diagnosis "${initialDiagnoses[i]}" to code: ${finalDiagnosisCodes[i]}...`);
+            // 3c2. Proceed to Final Diagnosis for each code
+            const finalDxContainer = page.locator('app-final-dx');
+            await finalDxContainer.waitFor({ state: 'visible', timeout: 15000 });
+
+            const existingFinalDiagLocator = finalDxContainer.locator('.ng-value');
+            const existingFinalTexts = await existingFinalDiagLocator.allInnerTexts();
+            const cleanExistingCodes = existingFinalTexts.map(text => text.trim().split(':')[0]);  // Splits by colon and isolates the exact code segment
+
+            for (let i = 0; i < uniqueFinalCodes.length; i++) {
+                const codeToMatch = uniqueFinalCodes[i];
+                if (cleanExistingCodes.some(existingText => existingText.includes(codeToMatch))) {
+                    logger(`ℹ️ Final diagnosis code [${codeToMatch}] is already present in the tags. Skipping this code...`);
+                    continue;
+                }
+
+                logger(`✅ Mapping diagnosis "${initialDiagnoses[i]}" to code: ${uniqueFinalCodes[i]}...`);
                 
                 // Locate the input search bar inside the Diagnosis section
                 const finalDiagInput = page.locator('app-final-dx ng-select input[type="text"]');
@@ -224,8 +242,8 @@ async function runAutomationBody(page, browser) {
                 await finalDiagInput.click();
                 
                 // Input the code and click the item from the dynamic search dropdown
-                await finalDiagInput.fill(finalDiagnosisCodes[i]);
-                const dynamicDropdownResult = page.locator('.ng-dropdown-panel .ng-option').getByText(finalDiagnosisCodes[i], { exact: false }).first();
+                await finalDiagInput.fill(uniqueFinalCodes[i]);
+                const dynamicDropdownResult = page.locator('.ng-dropdown-panel .ng-option').getByText(uniqueFinalCodes[i], { exact: false }).first();
                 await dynamicDropdownResult.waitFor({ state: 'visible', timeout: 5000 });
                 await page.waitForTimeout(1000); // artificially wait to slow down
                 await dynamicDropdownResult.click();
@@ -237,17 +255,24 @@ async function runAutomationBody(page, browser) {
             await page.locator('app-final-dx').getByRole('button', { name: /save/i }).click();
             await page.waitForTimeout(1000); // artificially wait to slow down
 
-            // 3c2e. Click "End Visit" on the middle section header actions
-            await page.locator('.consultation-header-actions').getByRole('button', { name: /end visit/i }).first().click();
-            await page.waitForTimeout(1000); // artificially wait to slow down
-
-            // 3c2f. Handle the modal/popup confirmation
-            const modalEndVisitBtn = page.getByRole('dialog').getByRole('button', { name: /end visit/i });
-            await modalEndVisitBtn.waitFor({ state: 'visible' });
-            await page.waitForTimeout(1000); // artificially wait to slow down
-            await modalEndVisitBtn.click();
-            
-            endedVisitCount++;
+            // 3c2e. Click "End Visit" on the middle section header actions (only if all tags are mapped)
+            if (finalDiagnosisCodes.length === initialDiagnoses.length) {
+                await page.locator('.consultation-header-actions').getByRole('button', { name: /end visit/i }).first().click();
+                await page.waitForTimeout(1000); // artificially wait to slow down
+                
+                // 3c2f. Handle the modal/popup confirmation
+                const modalEndVisitBtn = page.getByRole('dialog').getByRole('button', { name: /end visit/i });
+                await modalEndVisitBtn.waitFor({ state: 'visible' });
+                await page.waitForTimeout(1000); // artificially wait to slow down
+                await modalEndVisitBtn.click();
+                
+                logger(`✅ Successfully ended visit with the following final diagnoses: [${uniqueFinalCodes?.join(", ")}], given the initial diagnoses: [${initialDiagnoses.join(", ")}].`);
+                endedVisitCount++;
+            }
+            else if (finalDiagnosisCodes.length > 0) {
+                skippedPatientNames.add(targetPatientName);
+                logger(`✅ Successfully updated final diagnoses with: [${uniqueFinalCodes?.join(", ")}], but at least one initial diagnosis is unmapped. The visit will NOT be ended.`);
+            }
 
             // 3d. Click the "Home" link icon in the upper right corner toolbar to reset the loop
             await clickHomeButton(page);
@@ -270,7 +295,7 @@ async function runAutomationBody(page, browser) {
             skippedPatientsList: Array.from(skippedPatientNames),
         };
 
-        globalAutomationData.totalCount += automationDataThisRun.endedVisitCount;
+        globalAutomationData.totalCount += globalAutomationData.totalCount === 0 ? automationDataThisRun : automationDataThisRun.totalCount;
         globalAutomationData.skippedCount = automationDataThisRun.skippedCount;
         globalAutomationData.endedVisitCount += automationDataThisRun.endedVisitCount;
         globalAutomationData.executionTimeSeconds += automationDataThisRun.executionTimeSeconds;
@@ -300,5 +325,4 @@ async function runAutomationBody(page, browser) {
         }
     }
 }
-
 startAutomation();

@@ -1,10 +1,10 @@
 {
-    "startAtPage" : 0,
-    "startAtRow" : 6,
+    "startAtPage" : 2,
+    "startAtRow" : 9,
 
     "attemptReload" : true,
-    "reloadAttempts" : 3,
+    "reloadAttempts" : 10,
 
     "debug_mode": true,
-    "debug_endedVisitTargetCount": 50
+    "debug_endedVisitTargetCount": 100
 }
