@@ -38,13 +38,13 @@ Before running the script, you must configure three files in the root directory.
 ### 1. `.env`
 Contains your private credentials and target portal data. Create a file named `.env` and add the following:
 ```env
-URL="https://wah.cavite.com"
+URL="https://cavite.wah.com"
 EMAIL="your_email@example.com"
 PASSWORD="your_password"
 NAME="Last Name, First Name MI."
 WAH_UUID="your_wah_uuid"
 ```
-> The UUID is going to need manual HTML fiddling in the website to get.
+> The UUID is going to need manual HTML fiddling in the website to get. Contact any contributor for help with this.
 
 ### 2. `diagnoses.json`
 Your dictionary mapping Initial Diagnoses (exact text) to Final Diagnosis Codes (codes only).
@@ -53,6 +53,7 @@ Your dictionary mapping Initial Diagnoses (exact text) to Final Diagnosis Codes 
   "Diabetes Mellitus": "E11",
   "Pregnant": "Z32",
   "URTI": "J39.9",
+  // ...
 }
 ```
 
@@ -78,7 +79,7 @@ Controls the behavior, speed, and starting points of the automation.
 
 ## 💻 Usage
 
-To start the automation, run:
+To start the automation, open the project in terminal and run:
 ```bash
 node app.js
 ```
