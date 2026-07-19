@@ -1,3 +1,12 @@
 {
-  "Essentially Normal Findings": "Z00.0"
+  "Essentially Normal Findings": "Z00.0",
+  "Pregnant": "Z32",
+  "HPN": "I10",
+  "DM": "E11",
+  "Diabetes Mellitus": "E11",
+  "URTI": "J39.9",
+  "UTI": "N39.0",
+  "Muscle Strain": "M79.1",
+  "Infected Wound": "T79.3",
+  "Family planning": "Z30"
 }
