@@ -4,6 +4,7 @@ A Node.js and Playwright automation tool designed to process patient records in 
 
 ## ✨ Features
 * **Smart Diagnosis Mapping:** Maps Initial Diagnoses to specific Final Diagnosis codes using a customizable dictionary.
+* **End visits:** Properly ends patient visits after ensuring all initial diagnoses were mapped with final diagnoses. Otherwise, the final diagnoses are saved but the visits remain active.
 * **Resilient Rate-Limit Handling:** Automatically catches "Too Many Attempts" errors and restarts properly.
 * **Pagination Support:** Automatically navigates through pages of patients.
 * **Safe Restart & Memory:** If the script crashes or hits a rate limit, it preserves the skipped patient list and total counts to prevent duplicate processing.
