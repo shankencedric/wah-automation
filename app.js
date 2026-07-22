@@ -6,6 +6,19 @@ const DIAGNOSIS_MAP = require('./diagnoses.json');
 
 const CONFIG = require('./config.json');
 
+// 🛑 GLOBAL INTERRUPTION HANDLING
+let isInterrupted = false;
+let sigintCount = 0;
+process.on('SIGINT', () => {
+    sigintCount++;
+    if (sigintCount >= 2) {
+        logger("🛑 Force quitting immediately without saving!");
+        process.exit(1); 
+    }
+    logger("🛑 Ctrl+C received! Finishing the current process and shutting down safely...");
+    isInterrupted = true;
+});
+
 let reloadCount = 0; 
 let globalAutomationData = {
     totalCount: 0,
@@ -19,12 +32,21 @@ let globalAutomationData = {
 };
 
 async function startAutomation() {
-    const browser = await chromium.launch({ headless: false, slowMo: CONFIG.debug_mode ? 200 : 50 });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-
-    await tryLogIn(page);
-    await runAutomationBody(page, browser);
+    try {
+        const browser = await chromium.launch({ headless: !CONFIG.debug_mode, slowMo: CONFIG.debug_mode ? 200 : 50 });
+        const context = await browser.newContext();
+        const page = await context.newPage();
+    
+        await tryLogIn(page);
+        await runAutomationBody(page, browser);
+    } catch (error) {
+        if (error.message.includes('Target closed') || error.message.includes('has been closed')) {
+            logger("🛑 Browser was manually closed during login setup. Ending safely.");
+        } else {
+            logger("❌ Error during startup/login:", error);
+        }
+        process.exit(1); 
+    }
 }
 
 async function tryLogIn(page) {
@@ -278,8 +300,14 @@ async function runAutomationBody(page, browser) {
             await clickHomeButton(page);
         }
     } catch (error) {
-        logger("❌ Automation encountered an error:", error);
-        hasCrashed = true;
+        // 🛑 Detect if the user manually closed the browser window (X button)
+        if (error.message.includes('Target closed') || error.message.includes('has been closed')) {
+            logger("🛑 Browser was manually closed by user. Ending automation safely.");
+            isInterrupted = true; 
+        } else {
+            logger("❌ Automation encountered an error:", error);
+            hasCrashed = true;
+        }
     } finally {
         
         const skippedCount = skippedPatientNames.size;
@@ -301,7 +329,7 @@ async function runAutomationBody(page, browser) {
         globalAutomationData.executionTimeSeconds += automationDataThisRun.executionTimeSeconds;
         globalAutomationData.skippedPatientsList = [...globalAutomationData.skippedPatientsList, ...automationDataThisRun.skippedPatientsList];
 
-        if (hasCrashed && CONFIG.attemptReload && reloadCount < CONFIG.reloadAttempts)
+        if (hasCrashed && !hasInterupted && CONFIG.attemptReload && reloadCount < CONFIG.reloadAttempts)
         {
             logger(`⚠️ Error received. Restarting automation (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
             
@@ -320,9 +348,14 @@ async function runAutomationBody(page, browser) {
             logger(JSON.stringify(globalAutomationData, null, 4));
             
             logger(`🟢 AUTOMATION COMPLETE: Exiting after ${globalAutomationData.endedVisitCount} successful end visits...`);
-            await page.waitForTimeout(3000);
-            await browser.close();
+            
+            try { 
+                await page.waitForTimeout(3000); 
+                await browser.close(); 
+            } catch (e) {  }
         }
+
+        process.exit(1); 
     }
 }
 startAutomation();
