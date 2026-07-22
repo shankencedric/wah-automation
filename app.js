@@ -295,7 +295,7 @@ async function runAutomationBody(page, browser) {
             skippedPatientsList: Array.from(skippedPatientNames),
         };
 
-        globalAutomationData.totalCount += globalAutomationData.totalCount === 0 ? automationDataThisRun : automationDataThisRun.totalCount;
+        globalAutomationData.totalCount += automationDataThisRun.totalCount;
         globalAutomationData.skippedCount = automationDataThisRun.skippedCount;
         globalAutomationData.endedVisitCount += automationDataThisRun.endedVisitCount;
         globalAutomationData.executionTimeSeconds += automationDataThisRun.executionTimeSeconds;
