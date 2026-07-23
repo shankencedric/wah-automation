@@ -93,7 +93,7 @@ async function runAutomationBody(page, browser) {
     let hasCrashed = false;
 
     try {
-        logger(`🔢 Will start at row ${CONFIG.startAtRow} on page ${CONFIG.startAtPage}...\n`);
+        logger(`🔢 Will start at row ${CONFIG.startAtRow + (skippedPatientNames.length % 40)} on page ${CONFIG.startAtPage + Math.floor(skippedPatientNames.length / 40)}...\n`);
 
         while (true) {
             if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
@@ -152,7 +152,8 @@ async function runAutomationBody(page, browser) {
             try {
                 await rowLocator.first().waitFor({ state: 'visible', timeout: 10000 });
             } catch (error) {
-                logger("📋 Detected 0 patients (Timeout reached).");
+                logger("⚠️ Timeout reached while detecting patients.", error);
+                break;
             }
             
             const patientRows = await rowLocator.all();
@@ -323,13 +324,13 @@ async function runAutomationBody(page, browser) {
             skippedPatientsList: Array.from(skippedPatientNames),
         };
 
-        globalAutomationData.totalCount += automationDataThisRun.totalCount;
         globalAutomationData.skippedCount = automationDataThisRun.skippedCount;
         globalAutomationData.endedVisitCount += automationDataThisRun.endedVisitCount;
+        globalAutomationData.totalCount = globalAutomationData.skippedCount + globalAutomationData.endedVisitCount;
         globalAutomationData.executionTimeSeconds += automationDataThisRun.executionTimeSeconds;
         globalAutomationData.skippedPatientsList = [...globalAutomationData.skippedPatientsList, ...automationDataThisRun.skippedPatientsList];
 
-        if (hasCrashed && !hasInterupted && CONFIG.attemptReload && reloadCount < CONFIG.reloadAttempts)
+        if (hasCrashed && !isInterrupted && CONFIG.attemptReload && reloadCount < CONFIG.reloadAttempts)
         {
             logger(`⚠️ Error received. Restarting automation (Attempt ${++reloadCount}/${CONFIG.reloadAttempts})...`);
             
