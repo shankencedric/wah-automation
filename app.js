@@ -93,7 +93,7 @@ async function runAutomationBody(page, browser) {
     let hasCrashed = false;
 
     try {
-        logger(`🔢 Will start at row ${CONFIG.startAtRow + (skippedPatientNames.length % 40)} on page ${CONFIG.startAtPage + Math.floor(skippedPatientNames.length / 40)}...\n`);
+        logger(`🔢 Will start at row ${CONFIG.startAtRow + (skippedPatientNames.size % 40)} on page ${CONFIG.startAtPage + Math.floor(skippedPatientNames.size / 40)}...\n`);
 
         while (true) {
             if (CONFIG.debug_mode && endedVisitCount >= CONFIG.debug_endedVisitTargetCount) {
